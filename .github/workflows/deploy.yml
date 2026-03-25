@@ -1,0 +1,115 @@
+name: OmniRAG CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Run backend tests
+        run: pytest backend/tests/ -v
+        env:
+          TESTING: "true"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint || true
+
+  deploy:
+    name: Deploy to GCP
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Build & push backend
+        run: |
+          docker build -t gcr.io/$PROJECT_ID/omnirag-backend:$GITHUB_SHA \
+                       -t gcr.io/$PROJECT_ID/omnirag-backend:latest \
+                       -f Dockerfile .
+          docker push gcr.io/$PROJECT_ID/omnirag-backend:$GITHUB_SHA
+          docker push gcr.io/$PROJECT_ID/omnirag-backend:latest
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          gcloud run deploy omnirag-backend \
+            --image gcr.io/$PROJECT_ID/omnirag-backend:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2 \
+            --set-env-vars "PROJECT_ID=$PROJECT_ID,LOCATION=$REGION"
+
+      - name: Get backend URL
+        id: backend
+        run: |
+          URL=$(gcloud run services describe omnirag-backend \
+            --region $REGION --format "value(status.url)")
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Build & push frontend
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_BACKEND_URL=${{ steps.backend.outputs.url }} \
+            -t gcr.io/$PROJECT_ID/omnirag-frontend:$GITHUB_SHA \
+            -t gcr.io/$PROJECT_ID/omnirag-frontend:latest \
+            -f frontend/Dockerfile ./frontend
+          docker push gcr.io/$PROJECT_ID/omnirag-frontend:$GITHUB_SHA
+          docker push gcr.io/$PROJECT_ID/omnirag-frontend:latest
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy omnirag-frontend \
+            --image gcr.io/$PROJECT_ID/omnirag-frontend:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated
+
+      - name: Print deployment URLs
+        run: |
+          echo "Backend: $(gcloud run services describe omnirag-backend --region $REGION --format 'value(status.url)')"
+          echo "Frontend: $(gcloud run services describe omnirag-frontend --region $REGION --format 'value(status.url)')"

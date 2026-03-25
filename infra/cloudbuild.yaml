@@ -1,0 +1,78 @@
+steps:
+  # Build backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/omnirag-backend:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/omnirag-backend:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    id: 'build-backend'
+
+  # Push backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/omnirag-backend:$COMMIT_SHA']
+    waitFor: ['build-backend']
+    id: 'push-backend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/omnirag-backend:latest']
+    waitFor: ['push-backend']
+
+  # Build frontend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/omnirag-frontend:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/omnirag-frontend:latest'
+      - '-f'
+      - 'frontend/Dockerfile'
+      - './frontend'
+    id: 'build-frontend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/omnirag-frontend:latest']
+    waitFor: ['build-frontend']
+
+  # Deploy backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'omnirag-backend'
+      - '--image=gcr.io/$PROJECT_ID/omnirag-backend:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--set-env-vars=PROJECT_ID=$PROJECT_ID,LOCATION=us-central1'
+    id: 'deploy-backend'
+    waitFor: ['push-backend']
+
+  # Deploy frontend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'omnirag-frontend'
+      - '--image=gcr.io/$PROJECT_ID/omnirag-frontend:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+    waitFor: ['build-frontend', 'deploy-backend']
+
+images:
+  - 'gcr.io/$PROJECT_ID/omnirag-backend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/omnirag-backend:latest'
+  - 'gcr.io/$PROJECT_ID/omnirag-frontend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/omnirag-frontend:latest'
+
+timeout: '1200s'
