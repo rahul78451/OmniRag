@@ -233,12 +233,6 @@ OmniRAG automatically grades query complexity and picks the best strategy:
 
 ---
 
-## 📹 Demo
-
-[Link to demo video — YouTube/Loom]
-
----
-
 ## 🔑 Environment variables
 
 | Variable | Required | Description |
@@ -253,9 +247,9 @@ OmniRAG automatically grades query complexity and picks the best strategy:
 ## 📝 License
 
 MIT — see [LICENSE](LICENSE)
-
+Author -Rahul Gupta (https://github.com/rahul78451)
 ---
 
 *Built for the Gemini Live Agent Challenge hackathon. Created with Google GenAI SDK and Google Cloud.*
-*#GeminiLiveAgentChallenge*
+
 #
